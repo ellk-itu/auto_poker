@@ -1,10 +1,9 @@
 from threading import Timer
 
-from .game_options import GameOptions
-from auto_poker.player import Player
 from event_emitter import EventEmitter
 from pokerkit import NoLimitTexasHoldem, State
 
+from player import Player
 from src.common.event_loop import EventLoop
 
 # Enums
@@ -12,7 +11,7 @@ from ..player.player_actions import PlayerActions  # pylint: disable=wrong-impor
 from ..serializable_state import SerializableState
 from .emitted_events import EmittedEvents
 from .game_events import GameEvents
-
+from .game_options import GameOptions
 
 # TODO: Add Some thing that makes it
 # easier to do default action thing
@@ -176,7 +175,7 @@ class Game(EventLoop[GameEvents]):
         self.event_emitter.emit(
             EmittedEvents.POST_ANTE,
             self.__ante,
-            tuple(self.__state.ante_poster_indices)[0],
+            next(iter(self.__state.ante_poster_indices)),
         )
         self.queue_event(GameEvents.DEFAULT)
 
@@ -212,6 +211,11 @@ class Game(EventLoop[GameEvents]):
         self.event_emitter.emit(EmittedEvents.KILL_HAND)
         self.queue_event(GameEvents.DEFAULT)
 
+    def __handle_show_or_muck(self):
+        self.__state.show_or_muck_hole_cards(True)
+        self.event_emitter.emit(EmittedEvents.SHOW_OR_MUCK)
+        self.queue_event(GameEvents.DEFAULT)
+
     def __handle_push_chips(self):
         self.__state.push_chips()
         self.event_emitter.emit(EmittedEvents.PUSH_CHIPS)
@@ -235,139 +239,15 @@ class Game(EventLoop[GameEvents]):
         self.__update_pokerkit_state()
         self.queue_event(GameEvents.ROUND_START)
 
-    def __handle_show_or_muck(self):
-        self.__state.show_or_muck_hole_cards(True)
-        self.event_emitter.emit(EmittedEvents.SHOW_OR_MUCK)
-        self.queue_event(GameEvents.DEFAULT)
-
-  def __handle_push_chips(self):
-    self.__state.push_chips()
-    self.event_emitter.emit(EmittedEvents.PUSH_CHIPS)
-    self.queue_event(GameEvents.DEFAULT)
-
-  def __handle_pull_chips(self):
-    self.__state.pull_chips()
-    self.event_emitter.emit(EmittedEvents.PULL_CHIPS)
-    self.queue_event(GameEvents.ROUND_END)
-
-  def __handle_round_end(self):
-    self.event_emitter.emit(EmittedEvents.ROUND_END)
-
-    self.__remove_out_players()
-    self.__raise_blinds()
-
-    if self.__is_game_won:
-      self.queue_event(GameEvents.GAME_WIN)
-      return
-
-    self.__update_pokerkit_state()
-    self.queue_event(GameEvents.ROUND_START)
-
-  def __handle_show_or_muck(self):
-    self.__state.show_or_muck_hole_cards(True)
-    self.event_emitter.emit(EmittedEvents.SHOW_OR_MUCK)
-    self.queue_event(GameEvents.DEFAULT)
-
-  def __handle_game_win(self):
-    self.event_emitter.emit(EmittedEvents.GAME_WIN, self.__players[0].id)
-    self.end()
-
-  def __handle_bets(self):
-
-    current_player = self.__player_to_act
-
-    def on_action(action: PlayerActions.value, amount: "Optional[int]"):
-      """Callback when a player acts"""
-
-      try:
-        match action:
-          case PlayerActions.CHECK_OR_CALL:
-            self.__state.check_or_call()
-          case PlayerActions.FOLD:
-            self.__state.fold()
-          case PlayerActions.RAISE:
-            self.__state.complete_bet_or_raise_to(amount)
-      except:  # pylint: disable=bare-except
-        print("An error occuored, defaulting")
-        try:
-          self.__state.fold()
-        except:  # pylint: disable=bare-except
-          self.__state.check_or_call()
-
-      current_player.event_emitter.remove("action", on_action)
-
-    def timeout():
-      """Callback when timed out"""
-
-      print("An error occuored, defaulting")
-      try:
-        self.__state.fold()
-      except:  # pylint: disable=bare-except
-        self.__state.check_or_call()
-      current_player.event_emitter.remove("action", on_action)
-
-    if not current_player:
-      print(list(self.__state.pots))
-
-    # Update player state
-    current_player.update_serializable_state(
-      SerializableState(current_player, self.__state)
-    )
-
-    # Subscribe to events from player
-    current_player.event_emitter.on("action", on_action)
-    current_player.on_turn()
-
-    Timer(timeout, self.__player_response_time)
-
-    self.queue_event(GameEvents.DEFAULT)
-
-  def start(self):  # pylint: disable=arguments-differ
-    super().start(GameEvents.GAME_START)
-
-  def on_event_cycle(self, event: GameEvents.value):  # pylint: disable=unused-private-member
-    """Called once every event cycle"""
-    match event:
-      case GameEvents.DEFAULT:
-        self.on_event_cycle(self.__next_event)
-      case GameEvents.GAME_START:
-        self.__handle_game_start()
-      case GameEvents.ROUND_START:
-        self.__handle_round_start()
-      case GameEvents.POST_ANTE:
-        self.__handle_post_ante()
-      case GameEvents.COLLECT_BETS:
-        self.__handle_bet_collect()
-      case GameEvents.POST_BLIND:
-        self.__handle_post_blind()
-      case GameEvents.BURN_CARD:
-        self.__handle_burn_card()
-      case GameEvents.DEAL_HOLE_CARDS:
-        self.__handle_deal_hole()
-      case GameEvents.DEAL_BOARD_CARDS:
-        self.__handle_deal_board()
-      case GameEvents.KILL_HAND:
-        self.__handle_kill_hand()
-      case GameEvents.PUSH_CHIPS:
-        self.__handle_push_chips()
-      case GameEvents.PULL_CHIPS:
-        self.__handle_pull_chips()
-      case GameEvents.SHOW_OR_MUCK:
-        self.__handle_show_or_muck()
-      case GameEvents.ROUND_END:
-        self.__handle_round_end()
-      case GameEvents.BETS:
-        self.__handle_bets()
-      case GameEvents.GAME_WIN:
-        self.__handle_game_win()
-      case _:
+    def __handle_game_win(self):
+        self.event_emitter.emit(EmittedEvents.GAME_WIN, self.__players[0].uuid)
         self.end()
 
     def __handle_bets(self):
 
         current_player = self.__player_to_act
 
-        def on_action(action: PlayerActions.value, amount: "Optional[int]"):
+        def on_action(action: PlayerActions, amount: int | None):
             """Callback when a player acts"""
 
             try:
@@ -378,14 +258,17 @@ class Game(EventLoop[GameEvents]):
                         self.__state.fold()
                     case PlayerActions.RAISE:
                         self.__state.complete_bet_or_raise_to(amount)
-            except:  # pylint: disable=bare-except
+            except ValueError:
                 print("An error occuored, defaulting")
-                try:
-                    self.__state.fold()
-                except:  # pylint: disable=bare-except
-                    self.__state.check_or_call()
 
-            current_player.event_emitter.remove("action", on_action)
+            try:
+                self.__state.fold()
+            except ValueError:
+                self.__state.check_or_call()
+
+            # None Guard
+            if current_player is Player:
+                current_player.event_emitter.remove("action", on_action)
 
         def timeout():
             """Callback when timed out"""
@@ -393,12 +276,15 @@ class Game(EventLoop[GameEvents]):
             print("An error occuored, defaulting")
             try:
                 self.__state.fold()
-            except:  # pylint: disable=bare-except
+            except ValueError:
                 self.__state.check_or_call()
-            current_player.event_emitter.remove("action", on_action)
+
+            # None Guard
+            if current_player is Player:
+                current_player.event_emitter.remove("action", on_action)
 
         if not current_player:
-            print(list(self.__state.pots))
+            raise ValueError("Something wrong happened")
 
         # Update player state
         current_player.update_serializable_state(
@@ -409,14 +295,14 @@ class Game(EventLoop[GameEvents]):
         current_player.event_emitter.on("action", on_action)
         current_player.on_turn()
 
-        Timer(timeout, self.__player_response_time)
+        Timer(self.__player_response_time, timeout)
 
         self.queue_event(GameEvents.DEFAULT)
 
-    def start(self):  # pylint: disable=arguments-differ
-        super().start(GameEvents.GAME_START)
+    def start(self, event: GameEvents = GameEvents.GAME_START):
+        super().start(event)
 
-    def on_event_cycle(self, event: GameEvents):  # pylint: disable=unused-private-member
+    def on_event_cycle(self, event: GameEvents):
         """Called once every event cycle"""
         match event:
             case GameEvents.DEFAULT:
@@ -451,6 +337,3 @@ class Game(EventLoop[GameEvents]):
                 self.__handle_bets()
             case GameEvents.GAME_WIN:
                 self.__handle_game_win()
-            case _:
-                self.end()
-                raise ValueError(f"{event} not recognized")

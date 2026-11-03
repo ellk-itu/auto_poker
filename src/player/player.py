@@ -1,8 +1,8 @@
 from event_emitter import EventEmitter
 from pokerkit import Card
 
-from auto_poker.serializable_state import SerializableState
-from auto_poker.serializable_state.game import GameState
+from serializable_state import SerializableState
+from serializable_state.game import GameState
 
 from .player_actions import PlayerActions
 
