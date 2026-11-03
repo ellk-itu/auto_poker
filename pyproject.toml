@@ -1,11 +1,13 @@
 [project]
 name = "auto-poker"
-version = "0.1.0"
+version = "0.0.1"
 description = "An engine capable of playing automated games of Texas Holdem poker"
 readme = "README.md"
 authors = [{ name = "Ellie", email = "ellk@itu.dk" }]
 requires-python = ">=3.14"
 dependencies = ["pokerkit>=0.7.7", "pyeventemitter>=1.0.5"]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
 
 [project.scripts]
 auto-poker = "auto_poker:main"
@@ -15,6 +17,4 @@ requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = [
-    "pytest>=9.2.0",
-]
+dev = ["pytest>=9.2.0"]
