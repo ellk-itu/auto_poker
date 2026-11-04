@@ -3,34 +3,63 @@ from enum import Enum
 
 
 class EventLoop[E: Enum]:
-    """Event loop that queues events to circumvent stack overflow"""
+    """
+    A continuous dispatcher of events.
+    Blocks a thread as long as it is running, and only allows execution of code through the loop.
+    """
 
     def __init__(self, events: type[E]):
         """
-        param:
-          events(Enum)
-          enum containing the possible event states
+        Creates new event loop.
+
+        Args:
+            events (type[E]): Available events that can be dispatched from loop
         """
 
         self.events: type[E] = events
         self.running: bool = False
         self.queue: deque[E] = deque()
 
-    def queue_event(self, event: E):  # pylint: disable=unused-private-member
-        """Queues a new event to be executed in the loop"""
+    def queue_event(self, event: E):
+        """
+        Queues a new event to be executed when the thread is free.
+
+        Args:
+            event (E): Description.
+        """
 
         self.__validate_event(event)
         self.queue.append(event)
 
     def on_event_cycle(self, event: E):
-        """Called every time a cycle is started"""
+        """
+        Function called everytime the tread is free and a new Event is dispatched.
+        @Abstract
 
-    def __validate_event(self, event: E):
+        Args:
+            event (E): The new dispatched event.
+        """
+
+    def __validate_event(self, event: Enum):
+        """
+        Validates event for dynimically typed events.
+
+        Args:
+            event (Enum): Event to validate.
+
+        Raises:
+            ValueError: Error if the event type is not included in [E].
+        """
         if event not in self.events:
             raise ValueError("Event is not in event list")
 
     def start(self, event: E):
-        """Start the event loop"""
+        """
+        Start the event loop.
+
+        Args:
+            event (E): The initial event.
+        """
 
         self.__validate_event(event)
 
@@ -42,6 +71,6 @@ class EventLoop[E: Enum]:
             self.on_event_cycle(next_event)
 
     def end(self):
-        """End the event loop"""
+        """End the event loop, freeing the thread."""
 
         self.running = False
