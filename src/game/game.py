@@ -1,10 +1,9 @@
-from threading import Timer
+import asyncio
 
 from event_emitter import EventEmitter
 from pokerkit import NoLimitTexasHoldem, State
 
 from player import Player
-from src.common.event_loop import EventLoop
 
 # Enums
 from ..player.player_actions import PlayerActions  # pylint: disable=wrong-import-order
@@ -17,7 +16,7 @@ from .game_options import GameOptions
 # easier to do default action thing
 
 
-class Game(EventLoop[GameEvents]):
+class Game:
     """
     Game engine.
     As of right now can only play texas Holdem
@@ -28,8 +27,6 @@ class Game(EventLoop[GameEvents]):
         players: list[Player],
         game_options: GameOptions,
     ):
-
-        super().__init__(GameEvents)
 
         # Game Settings
         self.__ante: int = game_options.ante
@@ -62,8 +59,10 @@ class Game(EventLoop[GameEvents]):
     @property
     def __player_to_act(self) -> Player | None:
         """
-        The player needed to act.
-        Will return null if no player currently needs to act.
+        The current player to act.
+
+        Returns:
+            Player | None: Player or None if no player is has to act.
         """
 
         if self.__state.actor_index is None:
@@ -74,7 +73,11 @@ class Game(EventLoop[GameEvents]):
     @property
     def __is_game_won(self) -> bool:
         """
-        Determines weather or not the game is won
+        Determines weather or not the game is won.
+        This is determined by the amount of players left, 1 (or fewer) will be assumed to be won by said player.
+
+        Returns:
+            bool: Whether or not the game has been won.
         """
 
         return len(self.__players) <= 1
@@ -82,7 +85,10 @@ class Game(EventLoop[GameEvents]):
     @property
     def __next_event(self) -> GameEvents:
         """
-        Get the next state based on board
+        Gets next event based on the current state of the board.
+
+        Returns:
+            GameEvents: Enum of next states.
         """
 
         if self.__state.can_push_chips():
@@ -155,21 +161,6 @@ class Game(EventLoop[GameEvents]):
         self.__small_blind += self.__blind_raise_amount
         self.__big_blind = self.__small_blind * 2
 
-    def __handle_game_start(self):
-        """
-        Read the name...
-        """
-        self.event_emitter.emit(EmittedEvents.GAME_START)
-        self.queue_event(GameEvents.ROUND_START)
-
-    def __handle_round_start(self):
-        """
-        Increment [__current_round] and emit events
-        """
-        self.__current_round += 1
-        self.event_emitter.emit(EmittedEvents.ROUND_START, self.__current_round)
-        self.queue_event(GameEvents.DEFAULT)
-
     def __handle_post_ante(self):
         self.__state.post_ante()
         self.event_emitter.emit(
@@ -177,140 +168,118 @@ class Game(EventLoop[GameEvents]):
             self.__ante,
             next(iter(self.__state.ante_poster_indices)),
         )
-        self.queue_event(GameEvents.DEFAULT)
 
     def __handle_bet_collect(self):
         self.__state.collect_bets()
         self.event_emitter.emit(EmittedEvents.COLLECT_BETS)
-        self.queue_event(GameEvents.DEFAULT)
 
     def __handle_post_blind(self):
         self.__state.post_blind_or_straddle()
         self.event_emitter.emit(EmittedEvents.POST_BLIND)
-        self.queue_event(GameEvents.DEFAULT)
         # TODO Fix the emitter for blinds
 
     def __handle_burn_card(self):
         self.__state.burn_card("??")
         self.event_emitter.emit(EmittedEvents.BURN_CARD)
-        self.queue_event(GameEvents.DEFAULT)
 
     def __handle_deal_hole(self):
         self.__state.deal_hole()
         self.event_emitter.emit(EmittedEvents.DEAL_HOLE_CARDS)
-        self.queue_event(GameEvents.DEFAULT)
 
     def __handle_deal_board(self):
         self.__state.deal_board()
         self.event_emitter.emit(EmittedEvents.DEAL_BOARD_CARDS)
-        self.queue_event(GameEvents.DEFAULT)
         # TODO fix board card for the emitter
 
     def __handle_kill_hand(self):
         self.__state.kill_hand()
         self.event_emitter.emit(EmittedEvents.KILL_HAND)
-        self.queue_event(GameEvents.DEFAULT)
 
     def __handle_show_or_muck(self):
         self.__state.show_or_muck_hole_cards(True)
         self.event_emitter.emit(EmittedEvents.SHOW_OR_MUCK)
-        self.queue_event(GameEvents.DEFAULT)
 
     def __handle_push_chips(self):
         self.__state.push_chips()
         self.event_emitter.emit(EmittedEvents.PUSH_CHIPS)
-        self.queue_event(GameEvents.DEFAULT)
 
     def __handle_pull_chips(self):
         self.__state.pull_chips()
         self.event_emitter.emit(EmittedEvents.PULL_CHIPS)
-        self.queue_event(GameEvents.ROUND_END)
 
-    def __handle_round_end(self):
-        self.event_emitter.emit(EmittedEvents.ROUND_END)
-
-        self.__remove_out_players()
-        self.__raise_blinds()
-
-        if self.__is_game_won:
-            self.queue_event(GameEvents.GAME_WIN)
-            return
-
-        self.__update_pokerkit_state()
-        self.queue_event(GameEvents.ROUND_START)
-
-    def __handle_game_win(self):
-        self.event_emitter.emit(EmittedEvents.GAME_WIN, self.__players[0].uuid)
-        self.end()
-
-    def __handle_bets(self):
-
+    async def __handle_bets(self):
         current_player = self.__player_to_act
 
-        def on_action(action: PlayerActions, amount: int | None):
-            """Callback when a player acts"""
-
-            try:
-                match action:
-                    case PlayerActions.CHECK_OR_CALL:
-                        self.__state.check_or_call()
-                    case PlayerActions.FOLD:
-                        self.__state.fold()
-                    case PlayerActions.RAISE:
-                        self.__state.complete_bet_or_raise_to(amount)
-            except ValueError:
-                print("An error occuored, defaulting")
-
-            try:
-                self.__state.fold()
-            except ValueError:
-                self.__state.check_or_call()
-
-            # None Guard
-            if current_player is Player:
-                current_player.event_emitter.remove("action", on_action)
-
-        def timeout():
-            """Callback when timed out"""
-
-            print("An error occuored, defaulting")
-            try:
-                self.__state.fold()
-            except ValueError:
-                self.__state.check_or_call()
-
-            # None Guard
-            if current_player is Player:
-                current_player.event_emitter.remove("action", on_action)
-
-        if not current_player:
+        if current_player is None:
             raise ValueError("Something wrong happened")
 
-        # Update player state
         current_player.update_serializable_state(
             SerializableState(current_player, self.__state)
         )
 
-        # Subscribe to events from player
-        current_player.event_emitter.on("action", on_action)
-        current_player.on_turn()
+        response = await self.__await_action(current_player)
+        self.__apply_action(response)
 
-        Timer(self.__player_response_time, timeout)
+    async def __await_action(self, player: Player) -> tuple[PlayerActions, int] | None:
+        """
+        Waits for the player to act.
+        Returns None if the player does not respond within the response time.
+        """
 
-        self.queue_event(GameEvents.DEFAULT)
+        loop = asyncio.get_running_loop()
+        response: asyncio.Future[tuple[PlayerActions, int]] = loop.create_future()
 
-    def start(self, event: GameEvents = GameEvents.GAME_START):
-        super().start(event)
+        def on_action(action: PlayerActions, amount: int):
+            def resolve():
+                if not response.done():
+                    response.set_result((action, amount))
 
-    def on_event_cycle(self, event: GameEvents):
-        """Called once every event cycle"""
+            # Thread-safe, so actions can come from an API thread as well as a bot
+            loop.call_soon_threadsafe(resolve)
+
+        player.event_emitter.on("action", on_action)
+        player.on_turn()
+
+        try:
+            return await asyncio.wait_for(response, timeout=self.__player_response_time)
+        except TimeoutError:
+            print("Player timed out, defaulting")
+            return None
+        finally:
+            player.event_emitter.remove("action", on_action)
+
+    def __apply_action(self, response: tuple[PlayerActions, int] | None):
+        if response is None:
+            self.__apply_default_action()
+            return
+
+        action, amount = response
+
+        try:
+            match action:
+                case PlayerActions.CHECK_OR_CALL:
+                    self.__state.check_or_call()
+                case PlayerActions.FOLD:
+                    self.__state.fold()
+                case PlayerActions.RAISE:
+                    self.__state.complete_bet_or_raise_to(amount)
+        except ValueError:
+            print("An error occuored, defaulting")
+            self.__apply_default_action()
+
+    def __apply_default_action(self):
+        """
+        Default action for a player to take.
+        Will default to folding if possible, and if not will check
+        """
+
+        try:
+            self.__state.fold()
+        except ValueError:
+            self.__state.check_or_call()
+
+    async def __handle_event(self, event: GameEvents):
         match event:
-            case GameEvents.DEFAULT:
-                self.on_event_cycle(self.__next_event)
-            case GameEvents.GAME_START:
-                self.__handle_game_start()
-            case GameEvents.ROUND_START:
-                self.__handle_round_start()
             case GameEvents.POST_ANTE:
                 self.__handle_post_ante()
             case GameEvents.COLLECT_BETS:
@@ -331,9 +300,50 @@ class Game(EventLoop[GameEvents]):
                 self.__handle_pull_chips()
             case GameEvents.SHOW_OR_MUCK:
                 self.__handle_show_or_muck()
-            case GameEvents.ROUND_END:
-                self.__handle_round_end()
             case GameEvents.BETS:
-                self.__handle_bets()
-            case GameEvents.GAME_WIN:
-                self.__handle_game_win()
+                await self.__handle_bets()
+
+    async def __play_round(self):
+        """
+        Play a single round of poker.
+
+        Round is over when the chips are pulled.
+        For more see:
+            https://pokerkit.readthedocs.io/en/stable/reference.html#pokerkit.state.State.pull_chips
+        """
+
+        self.__current_round += 1
+        self.event_emitter.emit(EmittedEvents.ROUND_START, self.__current_round)
+
+        while True:
+            event = self.__next_event
+            await self.__handle_event(event)
+
+            # Check if the chips have been pulled
+            if event is GameEvents.PULL_CHIPS and not self.__state.can_pull_chips():
+                return
+
+    def __end_round(self):
+        self.event_emitter.emit(EmittedEvents.ROUND_END)
+
+        self.__remove_out_players()
+        self.__raise_blinds()
+
+    async def start(self):
+        """
+        Plays rounds until one player remains.
+        Run with asyncio.run(game.start()). To stop early, cancel the task that runs it.
+        """
+
+        self.event_emitter.emit(EmittedEvents.GAME_START)
+
+        while True:
+            await self.__play_round()
+            self.__end_round()
+
+            if self.__is_game_won:
+                break
+
+            self.__update_pokerkit_state()
+
+        self.event_emitter.emit(EmittedEvents.GAME_WIN, self.__players[0].uuid)

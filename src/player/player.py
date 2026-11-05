@@ -1,10 +1,13 @@
+from typing import TYPE_CHECKING
+
 from event_emitter import EventEmitter
 from pokerkit import Card
 
-from serializable_state import SerializableState
-from serializable_state.game import GameState
-
 from .player_actions import PlayerActions
+
+if TYPE_CHECKING:
+    from serializable_state import SerializableState
+    from serializable_state.game import GameState
 
 
 class Player:
@@ -60,7 +63,10 @@ class Player:
         self.serializable_state = new_state
 
     def on_turn(self):
-        "Method called when it is players turn to act"
+        """
+        Method called when it is players turn to act
+        @Abstract
+        """
 
     def fold(self):
         "Checks (if applicable, and folds otherwise)"

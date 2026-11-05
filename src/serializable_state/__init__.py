@@ -1,13 +1,13 @@
 from copy import deepcopy
+from typing import TYPE_CHECKING
 
-from pokerkit import State
-from pokerkit.utilities import Card
+from player import PlayerActions
+from serializable_state.game import GameState
 
-from player.player import Player
+if TYPE_CHECKING:
+    from pokerkit import Card, State
 
-# Enums
-from ..player.player_actions import PlayerActions
-from .game import GameState
+    from player import Player
 
 
 class SerializableState:  # pylint: disable=too-few-public-methods
